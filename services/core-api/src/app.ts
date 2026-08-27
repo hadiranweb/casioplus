@@ -586,17 +586,23 @@ export function createApp(pool: Pool, options: AppOptions = {}) {
         input: runRow.input,
       };
       const rawBody = JSON.stringify(job);
-      const workerResponse = await fetch(`${workerUrl?.replace(/\/$/, '') ?? ''}/execute`, {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          'x-casioplus-runtime-signature': runtimeSignature(
-            rawBody,
-            process.env.RUNTIME_SHARED_SECRET,
-          ),
-        },
-        body: rawBody,
-      });
+      let workerResponse: globalThis.Response;
+      try {
+        workerResponse = await fetch(`${workerUrl.replace(/\/$/, '')}/execute`, {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            'x-casioplus-runtime-signature': runtimeSignature(
+              rawBody,
+              process.env.RUNTIME_SHARED_SECRET,
+            ),
+          },
+          body: rawBody,
+          signal: AbortSignal.timeout(Number(process.env.NATIVE_WORKER_TIMEOUT_MS ?? 30_000)),
+        });
+      } catch {
+        throw new HttpError(502, 'native_runtime_unavailable');
+      }
       if (!workerResponse.ok) {
         throw new HttpError(502, 'native_runtime_failed');
       }
