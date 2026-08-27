@@ -12,12 +12,12 @@ units:
     canonical_store: postgres
   app-web:
     path: apps/app-web
-    status: scaffold-only
+    status: mvp-surface
     public: false
     host: app.casioplus.com
   studio-web:
     path: apps/studio-web
-    status: scaffold-only
+    status: mvp-surface
     public: false
     host: studio.casioplus.com
   native-diagnosis-worker:

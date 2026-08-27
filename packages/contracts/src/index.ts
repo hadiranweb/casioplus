@@ -114,6 +114,21 @@ export const knowledgePromotionSchema = organizationContextSchema.extend({
   rationale: z.string().trim().min(1).max(5000),
 });
 
+export const nativeDiagnosisJobSchema = z.object({
+  schemaVersion: z.literal('business-diagnosis.v1'),
+  organizationId: identifierSchema,
+  workspaceId: identifierSchema,
+  actorId: identifierSchema,
+  workItemId: identifierSchema,
+  processRunId: identifierSchema,
+  input: z.record(z.string(), z.unknown()),
+});
+
+export const nativeExecutionResultSchema = z.object({
+  schemaVersion: z.literal('business-diagnosis.v1'),
+  output: z.record(z.string(), z.unknown()),
+});
+
 export const governedRetrievalSchema = organizationContextSchema.extend({
   query: z.string().trim().min(1).max(1000),
   allowedKinds: z.array(memoryKindSchema).optional(),
@@ -131,4 +146,6 @@ export type CreateKnowledgeClaimInput = z.infer<typeof createKnowledgeClaimSchem
 export type CreateCommitInput = z.infer<typeof createCommitSchema>;
 export type ReviewDecisionInput = z.infer<typeof reviewDecisionSchema>;
 export type KnowledgePromotionInput = z.infer<typeof knowledgePromotionSchema>;
+export type NativeDiagnosisJob = z.infer<typeof nativeDiagnosisJobSchema>;
+export type NativeExecutionResult = z.infer<typeof nativeExecutionResultSchema>;
 export type GovernedRetrievalInput = z.infer<typeof governedRetrievalSchema>;

@@ -3,6 +3,8 @@
     "target": "ES2022",
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
+    "jsx": "react-jsx",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "strict": true,
     "noEmit": true,
     "esModuleInterop": true,
@@ -16,6 +18,7 @@
     "services/**/*.ts",
     "apps/**/*.ts",
     "apps/**/*.tsx",
+    "apps/**/*.d.ts",
     "scripts/**/*.ts",
     "tests/**/*.ts"
   ],
