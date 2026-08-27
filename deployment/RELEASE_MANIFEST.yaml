@@ -1,20 +1,24 @@
 version: 1
 product: casioplus
 architecture: typescript-core-postgres-mvp
+readiness: core-vertical-slice-not-public-ready
 units:
   core-api:
     path: services/core-api
+    status: vertical-slice
     public: false
     port: 8080
     health: /healthz
     canonical_store: postgres
   app-web:
     path: apps/app-web
-    public: true
+    status: scaffold-only
+    public: false
     host: app.casioplus.com
   studio-web:
     path: apps/studio-web
-    public: true
+    status: scaffold-only
+    public: false
     host: studio.casioplus.com
   native-diagnosis-worker:
     path: services/native-diagnosis-worker

@@ -1,33 +1,93 @@
-# معماری baseline Casioplus
+# Baseline معماری Casioplus
 
 ## تصمیم اصلی
 
-برای MVP، Casioplus با یک Core یکپارچهٔ TypeScript/Node.js و PostgreSQL ساخته می‌شود. PostgreSQL منبع حقیقت Work، Flow، Run، WorkCommit، Review، Memory، Actor، Organization و Artifact metadata است. Rust از critical path خارج است و فقط در آینده و پس از اثبات سود قابل‌اندازه‌گیری می‌تواند به‌عنوان Worker تخصصی بازگردد.
+برای MVP، Casioplus با یک **Core یکپارچهٔ TypeScript/Node.js** و **PostgreSQL canonical** ساخته می‌شود. PostgreSQL منبع حقیقت Organization، Workspace، Actor، Membership، WorkItem، Flow، FlowVersion، ProcessRun، OperationalEvent، SemanticRecord، KnowledgeClaim، KnowledgeReview، KnowledgePromotion، OrganizationalMemoryItem، Artifact و Audit است. Rust از critical path خارج است و فقط پس از MVP و با اثبات سود قابل‌اندازه‌گیری می‌تواند به‌عنوان Worker تخصصی بازگردد.
 
-## boundaryها
+این انتخاب بر اساس launchability، سرعت iteration، migration reproducible، test end-to-end، tenant isolation و rollback انجام شده است؛ نه بر اساس وفاداری به زبان. هیچ dual-write دائمی با MySQL legacy وارد Core جدید نمی‌شود.
 
-App و Studio دو surface محصول هستند. App محل مصرف و مشاهدهٔ Work، Flow publication، ProcessRun، Review و Memory است. Studio محل ساخت و حکمرانی Flow، فرم، policy، version و publication است. هر دو در MVP می‌توانند از یک web host-aware و Core/API مشترک استفاده کنند، ولی route و permission آن‌ها جداست.
+## سطح‌های محصول
 
-Core/API تنها مرجع mutation canonical است. Worker، n8n، Open WebUI و OpenClaw از API یا event contract استفاده می‌کنند و direct database credential ندارند. n8n فقط orchestrator، Open WebUI فقط interaction/model plane و OpenClaw فقط restricted action plane با allowlist و approval است.
+App و Studio دو surface از یک محصول‌اند، نه دو repository یا دو منبع حقیقت.
 
-## domain vocabulary
+| Surface  | مسئولیت                                                                                                                                                        |
+| -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| App      | account، organization/workspace، invitation، Flow catalog/publication، Work و Run history، Artifact، Review Inbox و Memory View                                |
+| Studio   | FlowDefinition، input/output schema، policy، five-axis rubric، runtime binding، test، FlowVersion و publication governance                                     |
+| Core/API | identity/session edge، membership authorization، canonical lifecycle، validation، idempotency، audit، artifact metadata، review/promotion و governed retrieval |
 
-نام‌های حافظه از taxonomy علمی استفاده می‌کنند: `OperationalEvent`، `SemanticRecord`، `KnowledgeClaim`، `KnowledgeReview`، `KnowledgePromotion`، `OrganizationalMemoryItem`، `EvidenceSource` و `Provenance`. `WorkCommit` ثبت نتیجهٔ حکمرانی‌شدهٔ یک Work/Run است و با Git commit فنی یکی نیست.
+در MVP، App و Studio می‌توانند در یک host-aware web application مستقر شوند؛ ولی route، permission، data projection و hostname boundary از ابتدا جدا هستند. App و Studio هرگز direct PostgreSQL یا runtime credential ندارند.
 
-## مسیر Golden Flow
+## runtime boundaries
 
 ```text
-App user
-  → WorkItem
-  → Studio FlowDefinition + FlowVersion
-  → ProcessRun
-  → Native Diagnosis Worker
-  → RuntimeEvent + WorkCommit
-  → Review
-  → MemoryItem
-  → App Timeline / Governed Retrieval
+App / Studio
+       ↓ authenticated typed API
+TypeScript Core/API ───────── PostgreSQL
+       ├───────────────────── Redis/BullMQ بعد از نیاز واقعی
+       ├───────────────────── Object Storage برای payload artifact
+       ├───────────────────── Native Diagnosis Worker
+       ├───────────────────── n8n Adapter
+       ├───────────────────── Open WebUI Adapter
+       └───────────────────── OpenClaw Adapter
 ```
 
-## قواعد جلوگیری از debt
+Native Worker اولین runtime Golden Flow است. n8n فقط orchestrator، Open WebUI interaction/model plane و OpenClaw action plane محدود و approval-gated است. Runtimeها فقط event، result یا candidate تولید می‌کنند؛ Core مالک state canonical باقی می‌ماند. callbackها باید HMAC، timestamp، replay protection، correlation ID و idempotency داشته باشند.
 
-هیچ feature جدیدی بدون owner canonical، tenant scope، schema/contract، idempotency، test و rollback plan پذیرفته نمی‌شود. هیچ Runtime یا مدل AI مجاز به promotion مستقیم Memory نیست. هر failure باید با وضعیت صادقانه، correlation ID و audit قابل‌ردگیری باشد.
+## مدل دامنه و حافظه
+
+زنجیرهٔ canonical چنین است:
+
+```text
+WorkItem
+  → FlowDefinition / FlowVersion
+  → ProcessRun
+  → OperationalEvent
+  → SemanticRecord
+  → EvidenceSource / Provenance
+  → KnowledgeClaim
+  → KnowledgeReview
+  → KnowledgePromotion
+  → OrganizationalMemoryItem
+  → Governed Retrieval
+```
+
+`OperationalEvent` trace خام است و برای audit/replay نگه‌داری می‌شود. `SemanticRecord` checkpoint معنادار و immutable است. `KnowledgeClaim` گزارهٔ candidate است و تا review معتبر نیست. `OrganizationalMemoryItem` تنها واحد reusable دانش سازمانی است که باید scope، validity، audience، provenance، evidence و governance معتبر داشته باشد.
+
+`WorkCommit` در صورت نیاز فقط view/interaction label برای outcome یا snapshot است و entity canonical GitHub-like نیست. نام‌های Branch، Pull Request، Merge و Repository وارد مدل حافظه یا authorization نمی‌شوند.
+
+## Golden Flow
+
+```text
+Form Submission
+  → Input Validation
+  → WorkItem + ProcessRun
+  → Native Diagnosis Worker
+  → diagnosis.started / diagnosis.completed
+  → JSON + HTML Artifact metadata
+  → SemanticRecord: diagnostic_observation
+  → SemanticRecord: output_produced
+  → KnowledgeClaim(candidate)
+  → Human KnowledgeReview
+  → KnowledgePromotion
+  → OrganizationalMemoryItem
+  → permission-first Governed Retrieval
+```
+
+Golden Flow اول business diagnosis است: SWOT، gap analysis یا direct request به job-position profile ساختاریافته و candidate evaluation با پنج محور matching تبدیل می‌شود. Score بدون evidence، confidence و limitation معتبر نیست و خروجی worker تصمیم استخدامی خودکار نیست.
+
+## قواعد غیرقابل‌مذاکره
+
+Core/API تنها canonical writer است. tenant context در production از session یا service identity و membership سرور مشتق می‌شود؛ raw tenant headers فقط با feature flag صریح برای local development مجازند. هر repository query باید organization/workspace scope داشته باشد.
+
+مدل‌ها فقط typed context و tools allowlisted دریافت می‌کنند. action دارای side effect approval-gated است. candidate unreviewed در Governed Retrieval حذف می‌شود. Artifact metadata در PostgreSQL canonical است و payload واقعی از Object Storage با permission recheck و signed URL کوتاه‌عمر تحویل می‌شود.
+
+هر ProcessRun، Review و Promotion terminal state immutable دارد. اصلاح با record جدید و lineage انجام می‌شود. migrationها ordered و checksumدارند و release باید clean database، restart idempotency، rollback plan و evidence staging داشته باشد.
+
+## منابع
+
+[1]: ./CORE_SELECTION_ADR_FA.md 'ADR انتخاب Core MVP'
+[2]: ./MVP_CHARTER_FA.md 'منشور MVP Casioplus'
+[3]: ./DOMAIN_GLOSSARY_FA.md 'واژه‌نامهٔ دامنهٔ Casioplus'
+[4]: ./MEMORY_TAXONOMY_FA.md 'طبقه‌بندی حافظهٔ سازمانی Casioplus'
+[5]: ./THREAT_MODEL_FA.md 'Threat Model امنیتی MVP'

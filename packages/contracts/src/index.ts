@@ -58,6 +58,14 @@ export const runtimeEventSchema = organizationContextSchema.extend({
   idempotencyKey: z.string().trim().min(16).max(200).optional(),
 });
 
+export const createArtifactSchema = organizationContextSchema.extend({
+  processRunId: identifierSchema.nullable(),
+  artifactType: z.enum(['json', 'html', 'pdf', 'text', 'binary']),
+  objectKey: z.string().trim().min(1).max(500),
+  contentType: z.string().trim().min(1).max(200),
+  checksum: z.string().trim().max(200).nullable().optional(),
+});
+
 export const createSemanticRecordSchema = organizationContextSchema.extend({
   workItemId: identifierSchema,
   processRunId: identifierSchema,
@@ -117,6 +125,7 @@ export type CreateFlowInput = z.infer<typeof createFlowSchema>;
 export type CreateFlowVersionInput = z.infer<typeof createFlowVersionSchema>;
 export type CreateProcessRunInput = z.infer<typeof createProcessRunSchema>;
 export type RuntimeEventInput = z.infer<typeof runtimeEventSchema>;
+export type CreateArtifactInput = z.infer<typeof createArtifactSchema>;
 export type CreateSemanticRecordInput = z.infer<typeof createSemanticRecordSchema>;
 export type CreateKnowledgeClaimInput = z.infer<typeof createKnowledgeClaimSchema>;
 export type CreateCommitInput = z.infer<typeof createCommitSchema>;

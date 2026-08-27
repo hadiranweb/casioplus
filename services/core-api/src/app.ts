@@ -3,6 +3,7 @@ import helmet from 'helmet';
 import { randomUUID } from 'node:crypto';
 import type { Pool } from 'pg';
 import {
+  createArtifactSchema,
   createFlowSchema,
   createFlowVersionSchema,
   createKnowledgeClaimSchema,
@@ -485,6 +486,87 @@ export function createApp(pool: Pool, options: AppOptions = {}) {
         ...event,
         requestId: requestId(req),
       });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post('/api/v1/artifacts', async (req, res, next) => {
+    try {
+      const context = resolveTenantContext(req);
+      await requireMembership(pool, context, participantRoles, enforceMembership);
+      const input = createArtifactSchema.parse({ ...req.body, ...context });
+      const artifact = await withTransaction(pool, async (client) => {
+        if (input.processRunId) {
+          const run = await client.query(
+            `SELECT 1 FROM flow_runs
+              WHERE id = $1 AND organization_id = $2 AND workspace_id = $3`,
+            [input.processRunId, input.organizationId, input.workspaceId],
+          );
+          if (run.rowCount !== 1) {
+            throw new HttpError(404, 'artifact_process_run_not_found');
+          }
+        }
+        const inserted = await client.query(
+          `INSERT INTO artifacts
+              (organization_id, workspace_id, process_run_id, artifact_type,
+               object_key, content_type, checksum, status)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, 'available')
+           ON CONFLICT (organization_id, object_key) DO NOTHING
+           RETURNING id, organization_id AS "organizationId", workspace_id AS "workspaceId",
+                     process_run_id AS "processRunId", artifact_type AS "artifactType",
+                     object_key AS "objectKey", content_type AS "contentType", checksum,
+                     status, created_at AS "createdAt"`,
+          [
+            input.organizationId,
+            input.workspaceId,
+            input.processRunId,
+            input.artifactType,
+            input.objectKey,
+            input.contentType,
+            input.checksum ?? null,
+          ],
+        );
+        if (inserted.rowCount === 1) {
+          return { artifact: inserted.rows[0], idempotent: false };
+        }
+        const duplicate = await client.query(
+          `SELECT id, organization_id AS "organizationId", workspace_id AS "workspaceId",
+                  process_run_id AS "processRunId", artifact_type AS "artifactType",
+                  object_key AS "objectKey", content_type AS "contentType", checksum,
+                  status, created_at AS "createdAt"
+             FROM artifacts
+            WHERE organization_id = $1 AND object_key = $2`,
+          [input.organizationId, input.objectKey],
+        );
+        return { artifact: duplicate.rows[0], idempotent: true };
+      });
+      return res.status(artifact.idempotent ? 200 : 201).json({
+        ...artifact,
+        requestId: requestId(req),
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get('/api/v1/artifacts/:artifactId', async (req, res, next) => {
+    try {
+      const context = resolveTenantContext(req);
+      await requireMembership(pool, context, participantRoles, enforceMembership);
+      const result = await pool.query(
+        `SELECT id, organization_id AS "organizationId", workspace_id AS "workspaceId",
+                process_run_id AS "processRunId", artifact_type AS "artifactType",
+                object_key AS "objectKey", content_type AS "contentType", checksum,
+                status, created_at AS "createdAt"
+           FROM artifacts
+          WHERE id = $1 AND organization_id = $2 AND workspace_id = $3`,
+        [req.params.artifactId, context.organizationId, context.workspaceId],
+      );
+      if (result.rowCount !== 1) {
+        throw new HttpError(404, 'artifact_not_found');
+      }
+      return res.json({ artifact: result.rows[0], requestId: requestId(req) });
     } catch (error) {
       next(error);
     }
