@@ -26,6 +26,7 @@ if (!allowDevTenantHeaders && (!sessionSecret || sessionSecret.trim().length < 3
 
 const pool = createPool(databaseUrl);
 const app = createApp(pool, {
+  enforceMembership: true,
   resolveTenantContext: allowDevTenantHeaders
     ? headerTenantContext
     : authenticatedTenantContext(sessionSecret ?? ''),

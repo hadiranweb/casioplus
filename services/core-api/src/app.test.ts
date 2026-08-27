@@ -80,6 +80,16 @@ describe('Core/API application boundary', () => {
     );
   });
 
+  it('rejects an actor without active membership when enforcement is enabled', async () => {
+    const { pool } = createTestPool();
+    const response = await request(createApp(pool, { enforceMembership: true }))
+      .get('/api/v1/work-items')
+      .set(contextHeaders);
+
+    expect(response.status).toBe(403);
+    expect(response.body.error).toBe('membership_required');
+  });
+
   it('validates and creates a work item through the typed boundary', async () => {
     const { pool, query } = createTestPool();
     const response = await request(createApp(pool))
