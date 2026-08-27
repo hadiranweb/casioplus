@@ -2,7 +2,15 @@ import request from 'supertest';
 import { describe, expect, it, vi } from 'vitest';
 import type { Pool } from 'pg';
 import { createApp } from './app.js';
+import { authenticatedTenantContext, signSession } from './auth.js';
 
+const sessionSecret = 'local-test-session-secret-with-at-least-32-chars';
+const sessionClaims = {
+  organizationId: '00000000-0000-4000-8000-000000000001',
+  workspaceId: '00000000-0000-4000-8000-000000000002',
+  actorId: '00000000-0000-4000-8000-000000000003',
+  expiresAt: Date.now() + 60_000,
+};
 const contextHeaders = {
   'x-casioplus-organization-id': '00000000-0000-4000-8000-000000000001',
   'x-casioplus-workspace-id': '00000000-0000-4000-8000-000000000002',
@@ -52,6 +60,20 @@ describe('Core/API application boundary', () => {
     });
   });
 
+  it('accepts a valid signed session as the tenant context', async () => {
+    const { pool } = createTestPool();
+    const token = signSession(sessionClaims, sessionSecret);
+    const response = await request(
+      createApp(pool, {
+        resolveTenantContext: authenticatedTenantContext(sessionSecret),
+      }),
+    )
+      .get('/api/v1/work-items')
+      .set('authorization', `Bearer ${token}`);
+
+    expect(response.status).toBe(200);
+  });
+
   it('rejects requests without a complete tenant context', async () => {
     const { pool } = createTestPool();
     const response = await request(createApp(pool))
@@ -63,6 +85,20 @@ describe('Core/API application boundary', () => {
       error: 'invalid_request',
       requestId: 'req-invalid-context',
     });
+  });
+
+  it('rejects an invalid signed session with 401', async () => {
+    const { pool } = createTestPool();
+    const response = await request(
+      createApp(pool, {
+        resolveTenantContext: authenticatedTenantContext(sessionSecret),
+      }),
+    )
+      .get('/api/v1/work-items')
+      .set('authorization', 'Bearer invalid.session');
+
+    expect(response.status).toBe(401);
+    expect(response.body.error).toBe('authentication_required');
   });
 
   it('scopes work-item reads to the supplied organization and workspace', async () => {

@@ -15,6 +15,7 @@
     "test:watch": "vitest",
     "db:migrate": "tsx services/core-api/src/db/migrate.ts",
     "smoke:golden": "bash scripts/smoke-golden-flow.sh",
+    "auth:issue-dev": "tsx scripts/issue-dev-session.ts",
     "validate:topology": "tsx scripts/validate-topology.ts",
     "format": "prettier --write .",
     "format:check": "prettier --check ."
