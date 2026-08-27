@@ -69,15 +69,15 @@ curl -fsS "${AUTH_HEADER[@]}" -X POST http://127.0.0.1:${SMOKE_PORT}/api/v1/proc
 RUN_ID="$(grep -oE '"id":"[0-9a-f-]{36}"' /tmp/casioplus-golden-run.json | head -1 | cut -d'"' -f4)"
 test -n "$RUN_ID"
 
+curl -fsS "${AUTH_HEADER[@]}" -X POST http://127.0.0.1:${SMOKE_PORT}/api/v1/process-runs/${RUN_ID}/events \
+  -H 'content-type: application/json' \
+  -d "{\"type\":\"analysis.started\",\"payload\":{\"worker\":\"native-diagnosis\"},\"idempotencyKey\":\"${EVENT_IDEMPOTENCY_KEY}\"}" > /tmp/casioplus-golden-event.json
+
 curl -fsS "${AUTH_HEADER[@]}" -X POST http://127.0.0.1:${SMOKE_PORT}/api/v1/process-runs/${RUN_ID}/execute \
   -H 'content-type: application/json' > /tmp/casioplus-golden-execution.json
 grep -q '"schemaVersion":"business-diagnosis.v1"' /tmp/casioplus-golden-execution.json
 grep -q '"candidateEvaluations"' /tmp/casioplus-golden-execution.json
 grep -q '"status":"succeeded"' /tmp/casioplus-golden-execution.json
-
-curl -fsS "${AUTH_HEADER[@]}" -X POST http://127.0.0.1:${SMOKE_PORT}/api/v1/process-runs/${RUN_ID}/events \
-  -H 'content-type: application/json' \
-  -d "{\"type\":\"analysis.started\",\"payload\":{\"worker\":\"native-diagnosis\"},\"idempotencyKey\":\"${EVENT_IDEMPOTENCY_KEY}\"}" > /tmp/casioplus-golden-event.json
 curl -fsS "${AUTH_HEADER[@]}" -X POST http://127.0.0.1:${SMOKE_PORT}/api/v1/artifacts \
   -H 'content-type: application/json' \
   -d "{\"processRunId\":\"${RUN_ID}\",\"artifactType\":\"json\",\"objectKey\":\"golden/${RUN_ID}/report.json\",\"contentType\":\"application/json\",\"checksum\":\"smoke-checksum\"}" > /tmp/casioplus-golden-artifact.json

@@ -573,6 +573,9 @@ export function createApp(pool: Pool, options: AppOptions = {}) {
         throw new HttpError(409, 'native_runtime_binding_required');
       }
       const workerUrl = process.env.NATIVE_WORKER_URL;
+      if (!workerUrl) {
+        throw new HttpError(503, 'native_runtime_not_configured');
+      }
       const job = {
         schemaVersion: 'business-diagnosis.v1' as const,
         organizationId: runRow.organizationId,
