@@ -23,10 +23,12 @@ function requestId(req: Request): string {
   return req.header('x-correlation-id') ?? randomUUID();
 }
 
-export function createApp(
-  pool: Pool,
-  resolveTenantContext: TenantContextResolver = headerTenantContext,
-) {
+export interface AppOptions {
+  resolveTenantContext?: TenantContextResolver;
+}
+
+export function createApp(pool: Pool, options: AppOptions = {}) {
+  const resolveTenantContext = options.resolveTenantContext ?? headerTenantContext;
   const app = express();
   app.disable('x-powered-by');
   app.use(helmet());
@@ -143,6 +145,11 @@ export function createApp(
 
   app.use((error: unknown, req: Request, res: Response, _next: NextFunction) => {
     const requestIdValue = requestId(req);
+    if (error instanceof Error && 'statusCode' in error && typeof error.statusCode === 'number') {
+      const code =
+        'code' in error && typeof error.code === 'string' ? error.code : 'request_failed';
+      return res.status(error.statusCode).json({ error: code, requestId: requestIdValue });
+    }
     if (error instanceof Error && error.name === 'ZodError') {
       return res.status(400).json({
         error: 'invalid_request',
