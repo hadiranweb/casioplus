@@ -159,4 +159,16 @@ describe('Core/API application boundary', () => {
     expect(response.status).toBe(400);
     expect(response.body.error).toBe('invalid_request');
   });
+
+  it('handles allowlisted CORS preflight and preserves correlation IDs', async () => {
+    const { pool } = createTestPool();
+    const response = await request(createApp(pool))
+      .options('/api/v1/work-items')
+      .set('origin', 'http://localhost:5173')
+      .set('x-correlation-id', 'req-cors');
+
+    expect(response.status).toBe(204);
+    expect(response.headers['access-control-allow-origin']).toBe('http://localhost:5173');
+    expect(response.headers['x-correlation-id']).toBe('req-cors');
+  });
 });

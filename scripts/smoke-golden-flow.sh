@@ -5,10 +5,15 @@ cd /home/ubuntu/casioplus
 DB_NAME='casioplus_ts_core_bootstrap'
 TEST_DB_PASSWORD="$(openssl rand -hex 32)"
 SERVER_PID=''
+WORKER_PID=''
 cleanup() {
   if [[ -n "$SERVER_PID" ]]; then
     kill -- -"$SERVER_PID" 2>/dev/null || true
     kill "$SERVER_PID" 2>/dev/null || true
+  fi
+  if [[ -n "$WORKER_PID" ]]; then
+    kill -- -"$WORKER_PID" 2>/dev/null || true
+    kill "$WORKER_PID" 2>/dev/null || true
   fi
   sudo -u postgres psql -v ON_ERROR_STOP=1 -c "ALTER ROLE genflow_test PASSWORD NULL;" >/dev/null 2>&1 || true
 }
@@ -23,10 +28,21 @@ ACTOR_ID="$(psql -h 127.0.0.1 -U genflow_test -d "$DB_NAME" -Atc 'SELECT id FROM
 FLOW_ID="$(psql -h 127.0.0.1 -U genflow_test -d "$DB_NAME" -Atc 'SELECT id FROM flows ORDER BY created_at LIMIT 1')"
 WORK_ID="$(psql -h 127.0.0.1 -U genflow_test -d "$DB_NAME" -Atc 'SELECT id FROM work_items ORDER BY created_at LIMIT 1')"
 export SESSION_SECRET='local-smoke-session-secret-with-at-least-32-chars'
+export RUNTIME_SHARED_SECRET='local-smoke-runtime-secret-with-at-least-32-chars'
+WORKER_PORT="${CASIOPLUS_WORKER_SMOKE_PORT:-8096}"
+export NATIVE_WORKER_URL="http://127.0.0.1:${WORKER_PORT}"
 SESSION_TOKEN="$(SESSION_SECRET="$SESSION_SECRET" ORGANIZATION_ID="$ORG_ID" WORKSPACE_ID="$WORKSPACE_ID" ACTOR_ID="$ACTOR_ID" pnpm auth:issue-dev | tail -n 1)"
 AUTH_HEADER=(-H "authorization: Bearer ${SESSION_TOKEN}")
 export ALLOW_DEV_TENANT_HEADERS=false
 export NODE_ENV=development
+pnpm --filter @casioplus/native-diagnosis-worker build >/tmp/casioplus-native-worker-build.log
+setsid env NODE_ENV=production RUNTIME_SHARED_SECRET="$RUNTIME_SHARED_SECRET" NATIVE_WORKER_PORT="$WORKER_PORT" node services/native-diagnosis-worker/dist/server.js >/tmp/casioplus-native-worker-smoke.log 2>&1 &
+WORKER_PID=$!
+for _ in $(seq 1 30); do
+  if curl -fsS "${NATIVE_WORKER_URL}/healthz" >/dev/null; then break; fi
+  sleep 0.5
+done
+curl -fsS "${NATIVE_WORKER_URL}/healthz" >/tmp/casioplus-golden-worker-health.json
 SMOKE_PORT="${CASIOPLUS_SMOKE_PORT:-8095}"
 export PORT="$SMOKE_PORT"
 setsid pnpm dev:core > /tmp/casioplus-golden-smoke.log 2>&1 &
@@ -52,6 +68,12 @@ curl -fsS "${AUTH_HEADER[@]}" -X POST http://127.0.0.1:${SMOKE_PORT}/api/v1/proc
   -d "{\"workItemId\":\"${WORK_ID}\",\"flowId\":\"${FLOW_ID}\",\"flowVersionId\":\"${VERSION_ID}\",\"idempotencyKey\":\"${IDEMPOTENCY_KEY}\",\"input\":{\"business\":{\"industry\":\"technology\",\"size\":\"small\"},\"position\":{\"title\":\"Operations Lead\",\"responsibilities\":[\"build hiring process\"]},\"candidates\":[{\"id\":\"candidate-2\",\"experience\":[\"operations\"]}]}}" > /tmp/casioplus-golden-run.json
 RUN_ID="$(grep -oE '"id":"[0-9a-f-]{36}"' /tmp/casioplus-golden-run.json | head -1 | cut -d'"' -f4)"
 test -n "$RUN_ID"
+
+curl -fsS "${AUTH_HEADER[@]}" -X POST http://127.0.0.1:${SMOKE_PORT}/api/v1/process-runs/${RUN_ID}/execute \
+  -H 'content-type: application/json' > /tmp/casioplus-golden-execution.json
+grep -q '"schemaVersion":"business-diagnosis.v1"' /tmp/casioplus-golden-execution.json
+grep -q '"candidateEvaluations"' /tmp/casioplus-golden-execution.json
+grep -q '"status":"succeeded"' /tmp/casioplus-golden-execution.json
 
 curl -fsS "${AUTH_HEADER[@]}" -X POST http://127.0.0.1:${SMOKE_PORT}/api/v1/process-runs/${RUN_ID}/events \
   -H 'content-type: application/json' \

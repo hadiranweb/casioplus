@@ -1,6 +1,6 @@
 import express, { type NextFunction, type Request, type Response } from 'express';
 import helmet from 'helmet';
-import { randomUUID } from 'node:crypto';
+import { createHmac, randomUUID } from 'node:crypto';
 import type { Pool } from 'pg';
 import {
   createArtifactSchema,
@@ -12,6 +12,7 @@ import {
   createWorkItemSchema,
   governedRetrievalSchema,
   knowledgePromotionSchema,
+  nativeExecutionResultSchema,
   organizationContextSchema,
   reviewDecisionSchema,
   runtimeEventSchema,
@@ -21,6 +22,7 @@ import { withTransaction } from './db.js';
 export type TenantContext = ReturnType<typeof organizationContextSchema.parse>;
 export type TenantContextResolver = (req: Request) => TenantContext;
 type OrganizationRole = 'owner' | 'admin' | 'editor' | 'reviewer' | 'viewer' | 'consumer';
+type RequestWithCasioplusId = Request & { casioplusRequestId?: string };
 
 const authorRoles: OrganizationRole[] = ['owner', 'admin', 'editor'];
 const reviewerRoles: OrganizationRole[] = ['owner', 'admin', 'reviewer'];
@@ -53,11 +55,20 @@ export function headerTenantContext(req: Request): TenantContext {
 }
 
 function requestId(req: Request): string {
-  return req.header('x-correlation-id') ?? randomUUID();
+  const typedRequest = req as RequestWithCasioplusId;
+  typedRequest.casioplusRequestId ??= req.header('x-correlation-id') ?? randomUUID();
+  return typedRequest.casioplusRequestId;
 }
 
 function hasPgCode(error: unknown, code: string): boolean {
   return typeof error === 'object' && error !== null && 'code' in error && error.code === code;
+}
+
+function runtimeSignature(rawBody: string, secret: string | undefined): string {
+  if (!secret || secret.trim().length < 32) {
+    throw new HttpError(503, 'native_runtime_not_configured');
+  }
+  return createHmac('sha256', secret).update(rawBody, 'utf8').digest('hex');
 }
 
 async function requireMembership(
@@ -107,6 +118,43 @@ export function createApp(pool: Pool, options: AppOptions = {}) {
   app.disable('x-powered-by');
   app.use(helmet());
   app.use(express.json({ limit: '256kb' }));
+  app.use((req, res, next) => {
+    const startedAt = Date.now();
+    const id = requestId(req);
+    res.setHeader('x-correlation-id', id);
+    res.on('finish', () => {
+      console.log(
+        JSON.stringify({
+          level: 'info',
+          event: 'http.request',
+          requestId: id,
+          method: req.method,
+          path: req.path,
+          status: res.statusCode,
+          durationMs: Date.now() - startedAt,
+        }),
+      );
+    });
+    const origin = req.header('origin');
+    const allowedOrigins = new Set(
+      (process.env.CORS_ORIGINS ?? 'http://localhost:5173,http://localhost:5174')
+        .split(',')
+        .map((value) => value.trim())
+        .filter(Boolean),
+    );
+    if (origin && allowedOrigins.has(origin)) {
+      res.setHeader('access-control-allow-origin', origin);
+      res.setHeader('vary', 'Origin');
+      res.setHeader('access-control-allow-credentials', 'true');
+    }
+    res.setHeader('access-control-allow-headers', 'authorization, content-type, x-correlation-id');
+    res.setHeader('access-control-allow-methods', 'GET,POST,OPTIONS');
+    if (req.method === 'OPTIONS') {
+      res.status(204).end();
+      return;
+    }
+    next();
+  });
 
   app.get('/healthz', async (_req, res, next) => {
     try {
@@ -486,6 +534,109 @@ export function createApp(pool: Pool, options: AppOptions = {}) {
         ...event,
         requestId: requestId(req),
       });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post('/api/v1/process-runs/:runId/execute', async (req, res, next) => {
+    try {
+      const context = resolveTenantContext(req);
+      await requireMembership(pool, context, participantRoles, enforceMembership);
+      const run = await pool.query<{
+        id: string;
+        organizationId: string;
+        workspaceId: string;
+        workItemId: string;
+        flowId: string;
+        flowVersionId: string;
+        status: string;
+        input: Record<string, unknown>;
+        runtimeBinding: string;
+      }>(
+        `SELECT fr.id, fr.organization_id AS "organizationId", fr.workspace_id AS "workspaceId",
+                fr.work_item_id AS "workItemId", fr.flow_id AS "flowId",
+                fr.flow_version_id AS "flowVersionId", fr.status, fr.input,
+                fv.runtime_binding AS "runtimeBinding"
+           FROM flow_runs fr
+           JOIN flow_versions fv ON fv.id = fr.flow_version_id
+          WHERE fr.id = $1 AND fr.organization_id = $2 AND fr.workspace_id = $3
+            AND fv.flow_id = fr.flow_id`,
+        [req.params.runId, context.organizationId, context.workspaceId],
+      );
+      const runRow = run.rows[0];
+      if (!runRow) throw new HttpError(404, 'process_run_not_found');
+      if (runRow.status !== 'running' && runRow.status !== 'queued') {
+        throw new HttpError(409, 'process_run_not_executable');
+      }
+      if (runRow.runtimeBinding !== 'native') {
+        throw new HttpError(409, 'native_runtime_binding_required');
+      }
+      const workerUrl = process.env.NATIVE_WORKER_URL;
+      const job = {
+        schemaVersion: 'business-diagnosis.v1' as const,
+        organizationId: runRow.organizationId,
+        workspaceId: runRow.workspaceId,
+        actorId: context.actorId,
+        workItemId: runRow.workItemId,
+        processRunId: runRow.id,
+        input: runRow.input,
+      };
+      const rawBody = JSON.stringify(job);
+      const workerResponse = await fetch(`${workerUrl?.replace(/\/$/, '') ?? ''}/execute`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-casioplus-runtime-signature': runtimeSignature(
+            rawBody,
+            process.env.RUNTIME_SHARED_SECRET,
+          ),
+        },
+        body: rawBody,
+      });
+      if (!workerResponse.ok) {
+        throw new HttpError(502, 'native_runtime_failed');
+      }
+      const result = nativeExecutionResultSchema.parse(await workerResponse.json());
+      const saved = await withTransaction(pool, async (client) => {
+        await client.query(
+          `INSERT INTO runtime_events
+              (organization_id, workspace_id, process_run_id, actor_id, event_type, payload, idempotency_key)
+           VALUES ($1, $2, $3, $4, 'diagnosis.completed', $5, $6)
+           ON CONFLICT (organization_id, idempotency_key) DO NOTHING`,
+          [
+            runRow.organizationId,
+            runRow.workspaceId,
+            runRow.id,
+            context.actorId,
+            result.output,
+            `native-diagnosis:${runRow.id}:${result.schemaVersion}`,
+          ],
+        );
+        await client.query(
+          `UPDATE flow_runs
+              SET status = 'succeeded', output = $1, completed_at = now()
+            WHERE id = $2 AND organization_id = $3 AND workspace_id = $4
+              AND status NOT IN ('succeeded', 'failed', 'cancelled')`,
+          [result.output, runRow.id, runRow.organizationId, runRow.workspaceId],
+        );
+        await client.query(
+          `UPDATE work_items SET status = 'completed', updated_at = now()
+            WHERE id = $1 AND organization_id = $2 AND workspace_id = $3`,
+          [runRow.workItemId, runRow.organizationId, runRow.workspaceId],
+        );
+        const refreshed = await client.query(
+          `SELECT id, organization_id AS "organizationId", workspace_id AS "workspaceId",
+                  work_item_id AS "workItemId", flow_id AS "flowId", flow_version_id AS "flowVersionId",
+                  status, idempotency_key AS "idempotencyKey", input, output,
+                  error_code AS "errorCode", created_by_actor_id AS "createdByActorId",
+                  created_at AS "createdAt", completed_at AS "completedAt"
+             FROM flow_runs WHERE id = $1`,
+          [runRow.id],
+        );
+        return refreshed.rows[0];
+      });
+      return res.status(200).json({ run: saved, result, requestId: requestId(req) });
     } catch (error) {
       next(error);
     }
