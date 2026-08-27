@@ -10,12 +10,12 @@ Casioplus یک monorepo باقی می‌ماند، اما هر deployment unit �
 
 فایل `.github/workflows/ci.yml` برای pull request و push به `main` اجرا می‌شود و frozen install، formatting، typecheck، test، topology، migration روی PostgreSQL سرویس‌شده و build همهٔ unitها را انجام می‌دهد. هیچ secret deploymentی در CI عادی لازم نیست.
 
-فایل `.github/workflows/deploy.yml` پس از push به `main` validation را تکرار و deployment staging را برای چهار unit آغاز می‌کند. production فقط از `workflow_dispatch` با انتخاب `production` فعال می‌شود و به GitHub Environment محافظت‌شدهٔ production وابسته است. در نتیجه merge به `main` به‌تنهایی نباید production را تغییر دهد.
+فایل `.github/workflows/deploy.yml` پس از push به `main` validation را تکرار می‌کند و فقط در صورتی deployment staging را برای چهار unit آغاز می‌کند که repository variable به نام `LIARA_DEPLOY_ENABLED=true` تنظیم شده باشد. production علاوه بر همین gate، فقط از `workflow_dispatch` با انتخاب `production` فعال می‌شود و به GitHub Environment محافظت‌شدهٔ production وابسته است. در نتیجه merge به `main` به‌تنهایی نباید production را تغییر دهد و تا پیش از ساخت appهای Liara، deployها به‌صورت امن skip می‌شوند.
 
-| Environment  | Trigger                            | Required secrets                                                                                     | Gate                            |
-| ------------ | ---------------------------------- | ---------------------------------------------------------------------------------------------------- | ------------------------------- |
-| `staging`    | push به `main` یا dispatch staging | `LIARA_API_TOKEN`، `LIARA_CORE_APP`، `LIARA_WORKER_APP`، `LIARA_APP_WEB_APP`، `LIARA_STUDIO_WEB_APP` | CI سبز و Environment staging    |
-| `production` | فقط dispatch با input production   | همان secrets در Environment production                                                               | approval محافظت‌شدهٔ production |
+| Environment  | Trigger                                                            | Required secrets                                                                                     | Gate                            |
+| ------------ | ------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------- | ------------------------------- |
+| `staging`    | push به `main` یا dispatch staging، با `LIARA_DEPLOY_ENABLED=true` | `LIARA_API_TOKEN`، `LIARA_CORE_APP`، `LIARA_WORKER_APP`، `LIARA_APP_WEB_APP`، `LIARA_STUDIO_WEB_APP` | CI سبز و Environment staging    |
+| `production` | فقط dispatch با input production و gate فعال                       | همان secrets در Environment production                                                               | approval محافظت‌شدهٔ production |
 
 ## prerequisites دستی پیش از اولین deploy
 

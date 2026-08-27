@@ -54,7 +54,7 @@ jobs:
 
   deploy-staging:
     name: deploy-${{ matrix.unit }}-staging
-    if: github.event_name == 'push' || inputs.environment == 'staging'
+    if: (github.event_name == 'push' || inputs.environment == 'staging') && vars.LIARA_DEPLOY_ENABLED == 'true'
     needs: validate
     environment: staging
     runs-on: ubuntu-latest
@@ -101,7 +101,7 @@ jobs:
 
   deploy-production:
     name: deploy-${{ matrix.unit }}-production
-    if: github.event_name == 'workflow_dispatch' && inputs.environment == 'production'
+    if: github.event_name == 'workflow_dispatch' && inputs.environment == 'production' && vars.LIARA_DEPLOY_ENABLED == 'true'
     needs: validate
     environment: production
     runs-on: ubuntu-latest
