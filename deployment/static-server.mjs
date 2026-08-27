@@ -54,7 +54,10 @@ const server = createServer(async (request, response) => {
     return;
   }
   const contentType = mimeTypes[extname(filePath)] ?? 'application/octet-stream';
-  response.writeHead(200, { 'content-type': contentType, 'cache-control': filePath === indexPath ? 'no-cache' : 'public, max-age=31536000, immutable' });
+  response.writeHead(200, {
+    'content-type': contentType,
+    'cache-control': filePath === indexPath ? 'no-cache' : 'public, max-age=31536000, immutable',
+  });
   if (request.method === 'HEAD') {
     response.end();
     return;

@@ -1,3 +1,9 @@
-# OpenClaw Adapter
+# Casioplus OpenClaw adapter
 
-این adapter تنها مسیر actionهای محدود OpenClaw است. فهرست actionها allowlisted است، سرویس private می‌ماند و actionهای دارای side effect پیش از approval اجرا نمی‌شوند. هر request و result باید به Organization، Workspace، Actor، ProcessRun و idempotency key متصل و از مسیر Core/API ثبت شود.
+OpenClaw در Casioplus فقط **action plane** محدود است و owner هیچ‌کدام از Work، Run، Artifact یا Memory نیست. هر action باید در allowlist باشد، به approval معتبر وصل شود، زمان انقضا و idempotency key داشته باشد و نتیجهٔ آن از Core/API و audit عبور کند.
+
+قرارداد `src/index.ts` فقط سه action MVP را می‌پذیرد: `send_message`، `create_ticket` و `post_webhook`. actionهایی مانند shell execution، تغییر credential یا دسترسی مستقیم به PostgreSQL عمداً خارج از schema هستند. secret امضای action باید در secret manager بماند و هرگز به App، Studio یا مدل نمایش داده نشود.
+
+## وضعیت MVP
+
+validation و HMAC header در adapter آماده و در `src/index.test.ts` پوشش داده شده است. اتصال شبکهٔ واقعی OpenClaw تا زمان تثبیت approval persistence، replay protection و staging private network deferred است؛ این package به‌تنهایی side effect خارجی اجرا نمی‌کند.
