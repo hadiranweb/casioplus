@@ -1,0 +1,7 @@
+{
+  "name": "@casioplus/app-web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Casioplus App control and consumption surface"
+}

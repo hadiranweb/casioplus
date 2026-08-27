@@ -1,0 +1,7 @@
+{
+  "name": "@casioplus/n8n-adapter",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Signed orchestration boundary for n8n"
+}

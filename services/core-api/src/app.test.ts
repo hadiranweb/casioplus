@@ -1,0 +1,116 @@
+import request from 'supertest';
+import { describe, expect, it, vi } from 'vitest';
+import type { Pool } from 'pg';
+import { createApp } from './app.js';
+
+const contextHeaders = {
+  'x-casioplus-organization-id': '00000000-0000-4000-8000-000000000001',
+  'x-casioplus-workspace-id': '00000000-0000-4000-8000-000000000002',
+  'x-casioplus-actor-id': '00000000-0000-4000-8000-000000000003',
+};
+
+function createTestPool() {
+  const query = vi.fn(async (text: string) => {
+    if (text.includes('INSERT INTO work_items')) {
+      return {
+        rows: [
+          {
+            id: '00000000-0000-4000-8000-000000000004',
+            organizationId: '00000000-0000-4000-8000-000000000001',
+            workspaceId: '00000000-0000-4000-8000-000000000002',
+            title: 'Diagnose hiring process',
+            intent: 'business-diagnosis',
+            status: 'open',
+            createdByActorId: '00000000-0000-4000-8000-000000000003',
+          },
+        ],
+        rowCount: 1,
+      };
+    }
+    if (text.includes('FROM work_items')) {
+      return { rows: [], rowCount: 0 };
+    }
+    if (text.trim() === 'SELECT 1') {
+      return { rows: [{ '?column?': 1 }], rowCount: 1 };
+    }
+    return { rows: [], rowCount: 0 };
+  });
+
+  return { pool: { query } as unknown as Pool, query };
+}
+
+describe('Core/API application boundary', () => {
+  it('reports database health', async () => {
+    const { pool } = createTestPool();
+    const response = await request(createApp(pool)).get('/healthz');
+
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({
+      status: 'ok',
+      service: 'core-api',
+      database: 'ready',
+    });
+  });
+
+  it('rejects requests without a complete tenant context', async () => {
+    const { pool } = createTestPool();
+    const response = await request(createApp(pool))
+      .get('/api/v1/work-items')
+      .set('x-correlation-id', 'req-invalid-context');
+
+    expect(response.status).toBe(400);
+    expect(response.body).toMatchObject({
+      error: 'invalid_request',
+      requestId: 'req-invalid-context',
+    });
+  });
+
+  it('scopes work-item reads to the supplied organization and workspace', async () => {
+    const { pool, query } = createTestPool();
+    const response = await request(createApp(pool))
+      .get('/api/v1/work-items')
+      .set(contextHeaders)
+      .set('x-correlation-id', 'req-list');
+
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({ items: [], requestId: 'req-list' });
+    expect(query).toHaveBeenCalledWith(
+      expect.stringContaining('WHERE organization_id = $1 AND workspace_id = $2'),
+      ['00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000002'],
+    );
+  });
+
+  it('validates and creates a work item through the typed boundary', async () => {
+    const { pool, query } = createTestPool();
+    const response = await request(createApp(pool))
+      .post('/api/v1/work-items')
+      .set(contextHeaders)
+      .send({ title: 'Diagnose hiring process', intent: 'business-diagnosis' });
+
+    expect(response.status).toBe(201);
+    expect(response.body).toMatchObject({
+      id: '00000000-0000-4000-8000-000000000004',
+      organizationId: '00000000-0000-4000-8000-000000000001',
+      workspaceId: '00000000-0000-4000-8000-000000000002',
+      createdByActorId: '00000000-0000-4000-8000-000000000003',
+    });
+    expect(query).toHaveBeenCalledWith(expect.stringContaining('INSERT INTO work_items'), [
+      '00000000-0000-4000-8000-000000000001',
+      '00000000-0000-4000-8000-000000000002',
+      'Diagnose hiring process',
+      'business-diagnosis',
+      '00000000-0000-4000-8000-000000000003',
+    ]);
+  });
+
+  it('returns a typed validation error for an invalid work item', async () => {
+    const { pool } = createTestPool();
+    const response = await request(createApp(pool))
+      .post('/api/v1/work-items')
+      .set(contextHeaders)
+      .send({ title: '' });
+
+    expect(response.status).toBe(400);
+    expect(response.body.error).toBe('invalid_request');
+  });
+});

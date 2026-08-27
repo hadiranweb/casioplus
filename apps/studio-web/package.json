@@ -1,0 +1,7 @@
+{
+  "name": "@casioplus/studio-web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Casioplus Studio authoring and governance surface"
+}
