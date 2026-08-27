@@ -1,13 +1,12 @@
-import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { applyMigrations, createPool } from './db.js';
 import { createApp, headerTenantContext } from './app.js';
 import { authenticatedTenantContext } from './auth.js';
+import { loadMigrations } from './migrations.js';
 
 const rootDirectory = resolve(fileURLToPath(new URL('../../..', import.meta.url)));
-const migrationPath =
-  process.env.MIGRATIONS_FILE ?? resolve(rootDirectory, 'migrations/0001_canonical_mvp.sql');
+const migrationsDirectory = process.env.MIGRATIONS_DIR ?? resolve(rootDirectory, 'migrations');
 const port = Number(process.env.PORT ?? 8080);
 const databaseUrl = process.env.DATABASE_URL;
 const sessionSecret = process.env.SESSION_SECRET;
@@ -33,15 +32,14 @@ const app = createApp(pool, {
 });
 
 async function start(): Promise<void> {
-  const migrationSql = await readFile(migrationPath, 'utf8');
-  await applyMigrations(pool, '0001_canonical_mvp', migrationSql);
+  await applyMigrations(pool, await loadMigrations(migrationsDirectory));
   const server = app.listen(port, '0.0.0.0', () => {
     console.log(
       JSON.stringify({
         level: 'info',
         service: 'core-api',
         port,
-        migrationPath,
+        migrationsDirectory,
       }),
     );
   });
